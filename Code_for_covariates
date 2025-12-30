@@ -1,0 +1,701 @@
+# Project title: The association between depression and gut microbiome composition and functionality
+# Tasks: define exposures, outcomes, and covariates for the analysis
+
+library(dplyr)
+library(stringr)
+library(lubridate)
+
+## SIMPLER
+# load data
+simpler_cancer <- readRDS("/proj/...path.../cancer.RDS")
+simpler_alcohol <- readRDS("/proj/...path.../alcohol_consumption.RDS")
+simpler_hdisea <- readRDS("/proj/...path.../generalhealth_diagnosis.RDS")
+simpler_sleep <- readRDS("/proj/...path.../sleepquality.RDS")
+simpler_menta <- readRDS("/proj/...path.../mentalhealth.RDS")
+simpler_smoking <- readRDS("/proj/...path.../smoking.RDS")
+simpler_diet <- readRDS("/proj/...path.../diet.RDS")
+simpler_toilet <- readRDS("/proj/...path.../toilethabit.RDS")
+simpler_drug <- readRDS("/proj/...path.../drug.RDS")
+simpler_p <- readRDS("/proj/...path.../patient.RDS")
+simpler_gdata <- readRDS("/proj/...path.../general_data.RDS")
+simpler_pha <- readRDS("/proj/...path.../physical_activity.RDS")
+#-------------------------------------------------------------------------------
+
+
+simpler_alcohol <- simpler_alcohol %>%
+  select(id, alc1987, alc1987c, alc1997, alc1997c, alc2009, alc2009c, alc2019, alc2019c, alc_cliv, alc_clivc, clinicalvisit_date)
+simpler_hdisea <- simpler_hdisea %>%
+  select(id,starts_with(c("age_", "constipation")), diarrhea_tquest)
+simpler_diet <- simpler_diet %>%
+  select(id, starts_with("diethabit"), probiotics_cliv, probio_dl_week_cliv, ends_with(c("_nut06","_nut08")))
+simpler_pha <- simpler_pha %>%
+  select(id, starts_with("phy_ability"), age15_met, age30_met, age50_met, met1987, met2009, met2019, met_cliv)
+simpler_smoking <- simpler_smoking %>%
+  select(-clinicalvisit_date)
+
+simpler <- simpler_gdata %>%
+  full_join(simpler_alcohol, by="id") %>%
+  full_join(simpler_hdisea, by="id") %>%
+  full_join(simpler_diet, by="id") %>%
+  full_join(simpler_pha, by="id") %>%
+  full_join(simpler_sleep, by="id") %>%
+  full_join(simpler_smoking, by="id") 
+
+
+# depression: depressive symptom + patient register + drug register
+sim_date <- simpler %>%
+  select(id, clinicalvisit_date)
+
+depress <- c("296,0", "296,2", "298,0", "300,4", "296B", "296D", "298A", "300E", "311", "F32", "F33")
+
+depress_icd <- paste("^", depress, sep="", collapse = "|")
+
+# first diagnosis
+sim_depre <- simpler_p %>%
+  filter(., str_detect(diagnosis, depress_icd)) %>%
+  rename(date_depre=diag_date) %>%
+  select(id, date_depre) %>%
+  arrange(id, date_depre) %>%
+  group_by(id) %>%
+  slice_head(n=1) %>%
+  ungroup()
+
+# latest diagnosis before and first diagnosis after fecal sampling
+sim_depre_s1 <- simpler_p %>%
+  filter(., str_detect(diagnosis, depress_icd)) %>%
+  inner_join(sim_date, by="id") %>%
+  mutate(diffs=ifelse(diag_date<clinicalvisit_date, clinicalvisit_date - diag_date, NA)) %>%
+  filter(!is.na(diffs)) %>%
+  rename(date_latestdepre_beffecal=diag_date) %>% # the latest diagnosis before fecal sampling
+  arrange(id, diffs) %>%
+  group_by(id) %>%
+  slice_head(n=1) %>%
+  select(id, date_latestdepre_beffecal) %>%
+  ungroup()
+
+sim_depre_s2 <- simpler_p %>%
+  filter(., str_detect(diagnosis, depress_icd)) %>%
+  inner_join(sim_date, by="id") %>%
+  mutate(diffs=ifelse(diag_date>clinicalvisit_date, diag_date - clinicalvisit_date, NA)) %>%
+  filter(!is.na(diffs)) %>%
+  rename(date_firstdepre_postfecal=diag_date) %>% # the first diagnosis after fecal sampling
+  arrange(id, diffs) %>%
+  group_by(id) %>%
+  slice_head(n=1) %>%
+  select(id, date_firstdepre_postfecal) %>%
+  ungroup()
+
+# depressive symptoms
+sim_depressive <- simpler_menta %>%
+  mutate(
+    calm2008=case_when(
+      C_feel02 == 4 ~ 1,
+      C_feel02 == 3 ~ 2,
+      C_feel02 == 2 ~ 3,
+      C_feel02 == 1 ~ 4
+    ),
+    nervous2008=case_when(
+      C_feel04 == 4 ~ 1,
+      C_feel04 == 3 ~ 2,
+      C_feel04 == 2 ~ 3,
+      C_feel04 == 1 ~ 4
+    ),
+    happy2008=case_when(
+      C_feel05 == 4 ~ 1,
+      C_feel05 == 3 ~ 2,
+      C_feel05 == 2 ~ 3,
+      C_feel05 == 1 ~ 4
+    ),
+    blue2008=case_when(
+      C_feel06 %in% c(1:4) ~ C_feel06
+    ),
+    down2008=case_when(
+      C_feel10 == 4 ~ 1,
+      C_feel10 == 3 ~ 2,
+      C_feel10 == 2 ~ 3,
+      C_feel10 == 1 ~ 4
+      ),
+  calm2019=case_when(
+    E_feel02 == 4 ~ 1,
+    E_feel02 == 3 ~ 2,
+    E_feel02 == 2 ~ 3,
+    E_feel02 == 1 ~ 4
+  ),
+  nervous2019=case_when(
+    E_feel04 == 4 ~ 1,
+    E_feel04 == 3 ~ 2,
+    E_feel04 == 2 ~ 3,
+    E_feel04 == 1 ~ 4
+  ),
+  happy2019=case_when(
+    E_feel05 == 4 ~ 1,
+    E_feel05 == 3 ~ 2,
+    E_feel05 == 2 ~ 3,
+    E_feel05 == 1 ~ 4
+  ),
+  blue2019=case_when(
+    E_feel06 %in% c(1:4) ~ E_feel06
+  ),
+  down2019=case_when(
+    E_feel10 == 4 ~ 1,
+    E_feel10 == 3 ~ 2,
+    E_feel10 == 2 ~ 3,
+    E_feel10 == 1 ~ 4
+  )) %>%
+  mutate(descore2008=rowSums(select(., calm2008, nervous2008, happy2008, blue2008, down2008), na.rm=TRUE),
+         depress2008=ifelse(!is.na(descore2008) & descore2008*5>52, 0, # not depressed
+                            ifelse(!is.na(descore2008) & descore2008*5<53, 1, NA)),
+         descore2019=rowSums(select(., calm2019, nervous2019, happy2019, blue2019, down2019), na.rm=TRUE),
+         depress2019=ifelse(!is.na(descore2019) & descore2019*5>52, 0, # not depressed
+                            ifelse(!is.na(descore2019) & descore2019*5<53, 1, NA))) %>%
+  select(id, depress2008, depress2019)
+
+sim_psychi <- sim_depre %>%
+  full_join(sim_depressive, by="id") %>%
+  full_join(sim_depre_s1, by="id") %>%
+  full_join(sim_depre_s2, by="id") 
+
+# antidepressants 
+sim_antid <- simpler_drug %>%
+  filter(str_starts(atc,"N06A") | str_starts(atc, "N06CA"))
+
+sim_antid <- sim_antid %>%
+  left_join(sim_date, by="id")
+
+sim_antid <- sim_antid %>%
+  filter(pack_num>=0) %>%
+  mutate(length_antiuse=ifelse(!is.na(pack_num) & !is.na(pack_ddd), pack_num*pack_ddd, NA), 
+         length_antiuse=ifelse(!is.na(length_antiuse), ceiling(length_antiuse), NA))
+
+# any antidepressants use before fecal sampling
+sim_antid_p <- sim_antid %>%
+  filter(dispen_date<=clinicalvisit_date)
+
+any_antid <- sim_antid_p %>%
+  mutate(antid_ever=1,
+         last_antid_dispen=dispen_date) %>%
+  arrange(id, dispen_date) %>%
+  group_by(id) %>%
+  slice_tail(n=1) %>%
+  ungroup() %>%
+  select(id, antid_ever, last_antid_dispen)
+
+cumulative_dose <- function(data) {
+  data <- data %>%
+    filter(!is.na(length_antiuse)) %>%
+    arrange(dispen_date)
+  for (i in 1:nrow(data)) {
+    window_start <- data$dispen_date[i]
+    window_end <- window_start + days(27) # 1+27=28: 4 weeks
+    cumula_dose <- sum(data$length_antiuse[data$dispen_date >= window_start & data$dispen_date <= window_end])
+    
+    if (cumula_dose >=28) {
+      return(TRUE)
+    }
+  }
+  return(FALSE)
+}
+
+check_antid <- sim_antid_p %>%
+  group_by(id) %>%
+  summarise(over_threshold = cumulative_dose(pick(everything())))
+
+over_threshold <- check_antid %>%
+  filter(over_threshold) %>%
+  mutate(antid_over28=1) %>% # dispense more than 4-week dose during a 4-week interval
+  select(id, antid_over28)
+
+# any antidepressants use (>=28 days) within 2 years before fecal sampling
+sim_antid_p <- sim_antid %>%
+  filter(dispen_date<=clinicalvisit_date & clinicalvisit_date-dispen_date<=756) # in case, an antidepressant trial started 2 years + 27 days ago
+
+check_antid <- sim_antid_p %>%
+  group_by(id) %>%
+  summarise(over_threshold = cumulative_dose(pick(everything())))
+
+over_thresholds <- check_antid %>%
+  filter(over_threshold) %>%
+  mutate(antid_over28_2yfecal=1) %>% # dispense more than 4-week dose during a 4-week interval within the 2 years before fecal sampling
+  select(id, antid_over28_2yfecal)
+
+simpler <- simpler %>%
+  left_join(sim_psychi, by="id") %>%
+  left_join(any_antid, by="id") %>%
+  left_join(over_threshold, by="id") %>%
+  left_join(over_thresholds, by="id")
+
+# comorbidities identified from registers: any other psychiatric disorders, CVD, diabetes
+any_psychi <- c("291", "292", "295", "296", "297", "298", "299", "300", "301", "302", "303", "304", "305", "306", "307", "308", "309", "310", "311", "312", "313", "314", "315", "316", "317", "318", "319", "F1", "F2", "F3", "F4", "F5", "F6", "F7", "F8", "F9")
+cvd <- c("39", "40", "41", "42", "43", "44", "45", "I")
+diabetes <- c("250", "648A", "E10", "E11", "E12", "E13", "E14", "O24")
+
+any_psychi_icd <- paste("^", any_psychi, sep="", collapse = "|")
+cvd_icd <- paste("^", cvd, sep="", collapse = "|")
+diabetes_icd <- paste("^", diabetes, sep="", collapse = "|")
+
+sim_diag <- simpler_p %>%
+  mutate(diag_year=as.numeric(format(diag_date, "%Y"))) %>%
+  mutate(any_psychi_date=ifelse(str_detect(diagnosis, any_psychi_icd), diag_date, NA),
+         cvd_date=ifelse(str_detect(diagnosis, cvd_icd), diag_date, NA),
+         diabetes_date=ifelse(str_detect(diagnosis, diabetes_icd), diag_date, NA))
+
+sim_any_psychi <- sim_diag %>%
+  filter(!is.na(any_psychi_date)) %>%
+  arrange(id, any_psychi_date) %>%
+  group_by(id) %>%
+  slice_head(n=1) %>%
+  ungroup() %>%
+  mutate(any_psychi_date=as.Date(any_psychi_date)) %>%
+  select(id, any_psychi_date)
+# 557
+sim_any_psychi <- sim_any_psychi %>%
+  anti_join(sim_depre, by="id") %>%
+  anti_join(sim_anxiety, by="id") %>%
+  anti_join(sim_stress, by="id") %>%
+  rename(any_otherpsychi_date=any_psychi_date) %>%
+  select(id, any_otherpsychi_date)
+# 222
+sim_cvd <- sim_diag %>%
+  filter(!is.na(cvd_date)) %>%
+  arrange(id, cvd_date) %>%
+  group_by(id) %>%
+  slice_head(n=1) %>%
+  ungroup() %>%
+  mutate(cvd_date=as.Date(cvd_date)) %>%
+  select(id, cvd_date)
+# 3542
+sim_diabetes <- sim_diag %>%
+  filter(!is.na(diabetes_date)) %>%
+  arrange(id, diabetes_date) %>%
+  group_by(id) %>%
+  slice_head(n=1) %>%
+  ungroup() %>%
+  mutate(diabetes_date=as.Date(diabetes_date)) %>%
+  select(id, diabetes_date)
+# 481
+sim_dementia <- sim_diag %>%
+  filter(!is.na(dementia_date)) %>%
+  arrange(id, dementia_date) %>%
+  group_by(id) %>%
+  slice_head(n=1) %>%
+  ungroup() %>%
+  mutate(dementia_date=as.Date(dementia_date)) %>%
+  select(id, dementia_date)
+# 130
+
+simpler <- simpler %>%
+  left_join(sim_any_psychi, by="id") %>%
+  left_join(sim_cvd, by="id") %>%
+  left_join(sim_diabetes, by="id") 
+
+# antibiotics use within six months or one year before fecal sampling
+antibio <- c("A07AA","C05AB","J01","J02AA","J04","R02AB")
+antibio_icd <- paste("^", antibio, sep="", collapse = "|")
+
+antibiotics <- simpler_drug %>%
+  mutate(antibio_date=ifelse(str_detect(atc, antibio_icd),dispen_date, NA)) %>%
+  filter(!is.na(antibio_date)) %>%
+  select(id, antibio_date) %>%
+  inner_join(sim_date, by="id") 
+antibio_6mon <- antibiotics %>%
+  filter(clinicalvisit_date - antibio_date>0) %>%
+  filter(clinicalvisit_date - antibio_date<183) %>%
+  distinct(id) %>%
+  mutate(antibiotics_6mon=1) # antibiotics use within 6 months before fecal sampling
+antibio_1year <- antibiotics %>%
+  filter(clinicalvisit_date - antibio_date>0) %>%
+  filter(clinicalvisit_date - antibio_date<366) %>%
+  distinct(id) %>%
+  mutate(antibiotics_1year=1) # antibiotics use within 1 year before fecal sampling
+
+simpler <- simpler %>%
+  left_join(antibio_6mon,by="id") %>%
+  left_join(antibio_1year,by="id")
+
+saveRDS(simpler, "/proj/...path.../simpler.RDS")
+#-------------------------------------------------------------------------------
+
+# SCAPIS
+rm(list=ls())
+# load data
+scapis_c <- readRDS("/proj/...path.../scapis_clean.RDS")
+scapis_p <- readRDS("/proj/...path.../patient.RDS") 
+scapis_drug <- readRDS("/proj/...path.../drug.RDS")
+
+# Only the first three digits of ICD-8 and 9 in SCAPIS are available
+sca_date <- scapis_c %>%
+  select(id, date_entry)
+depress <- c("296", "298", "300", "311", "F32", "F33")
+
+depress_icd <- paste("^", depress, sep="", collapse = "|")
+
+# first diagnosis
+sca_depre <- scapis_p %>%
+  filter(., str_detect(diagnosis, depress_icd)) %>%
+  rename(date_depre=diag_date) %>%
+  select(id, date_depre) %>%
+  arrange(id, date_depre) %>%
+  group_by(id) %>%
+  slice_head(n=1) %>%
+  ungroup()
+# 801
+
+# latest diagnosis before and first diagnosis after fecal sampling
+sca_depre_s1 <- scapis_p %>%
+  filter(., str_detect(diagnosis, depress_icd)) %>%
+  inner_join(sca_date, by="id") %>%
+  mutate(diffs=ifelse(diag_date<date_entry, date_entry - diag_date, NA)) %>%
+  filter(!is.na(diffs)) %>%
+  rename(date_latestdepre_beffecal=diag_date) %>% # the latest diagnosis before fecal sampling
+  arrange(id, diffs) %>%
+  group_by(id) %>%
+  slice_head(n=1) %>%
+  select(id, date_latestdepre_beffecal) %>%
+  ungroup()
+
+sca_depre_s2 <- scapis_p %>%
+  filter(., str_detect(diagnosis, depress_icd)) %>%
+  inner_join(sca_date, by="id") %>%
+  mutate(diffs=ifelse(diag_date>date_entry, diag_date - date_entry, NA)) %>%
+  filter(!is.na(diffs)) %>%
+  rename(date_firstdepre_postfecal=diag_date) %>% # the first diagnosis after fecal sampling
+  arrange(id, diffs) %>%
+  group_by(id) %>%
+  slice_head(n=1) %>%
+  select(id, date_firstdepre_postfecal) %>%
+  ungroup()
+
+sca_psychi <- sca_depre %>%
+  full_join(sca_depre_s1, by="id") %>%
+  full_join(sca_depre_s2, by="id")  
+
+# antidepressants 
+#the DDD of package for each drug from the SIMPLER data
+ddd_drug <- readRDS("/proj/...path.../drug.RDS")
+
+ddd_p <- ddd_drug %>%
+  filter(str_starts(atc,"N06A") | str_starts(atc, "N06CA")) %>%
+  select(atc, pack_size, pack_ddd) %>%
+  arrange(atc, pack_size, pack_ddd) %>%
+  group_by(atc, pack_size) %>%
+  slice_head(n=1) %>%
+  ungroup()
+
+scapis_drug <- scapis_drug %>%
+  left_join(ddd_p, by=c("atc", "pack_size"))
+
+sca_antid <- scapis_drug %>%
+  filter(str_starts(atc,"N06A") | str_starts(atc, "N06CA"))
+
+sca_antid <- sca_antid %>%
+  inner_join(sca_date, by="id")
+
+sca_antid <- sca_antid %>%
+  filter(pack_num>=0) %>%
+  mutate(length_antiuse=ifelse(!is.na(pack_num) & !is.na(pack_ddd), pack_num*pack_ddd, NA), 
+         length_antiuse=ifelse(!is.na(length_antiuse), ceiling(length_antiuse), NA))
+
+# any antidepressants use before fecal sampling
+sca_antid_p <- sca_antid %>%
+  filter(dispen_date<=date_entry)
+
+any_antid <- sca_antid_p %>%
+  mutate(antid_ever=1,
+         last_antid_dispen=dispen_date) %>%
+  arrange(id, dispen_date) %>%
+  group_by(id) %>%
+  slice_tail(n=1) %>%
+  ungroup() %>%
+  select(id, antid_ever, last_antid_dispen)
+
+cumulative_dose <- function(data) {
+  data <- data %>%
+    filter(!is.na(length_antiuse)) %>%
+    arrange(dispen_date)
+  for (i in 1:nrow(data)) {
+    window_start <- data$dispen_date[i]
+    window_end <- window_start + days(27)
+    cumula_dose <- sum(data$length_antiuse[data$dispen_date >= window_start & data$dispen_date <= window_end])
+    
+    if (cumula_dose >=28) {
+      return(TRUE)
+    }
+  }
+  return(FALSE)
+}
+
+check_antid <- sca_antid_p %>%
+  group_by(id) %>%
+  summarise(over_threshold = cumulative_dose(pick(everything())))
+
+over_threshold <- check_antid %>%
+  filter(over_threshold) %>%
+  mutate(antid_over28=1) %>% # dispense more 4-week dose during a 4-week interval
+  select(id, antid_over28)
+
+# any antidepressants use (>=28 days) within 2 years before fecal sampling
+sca_antid_p <- sca_antid %>%
+  filter(dispen_date<=date_entry & date_entry-dispen_date<=756) # in case, a antidepressant trial started 2 years + 27 days ago
+
+check_antid <- sca_antid_p %>%
+  group_by(id) %>%
+  summarise(over_threshold = cumulative_dose(pick(everything())))
+
+over_thresholds <- check_antid %>%
+  filter(over_threshold) %>%
+  mutate(antid_over28_2yfecal=1) %>% # dispense more than 4-week dose during a 4-week interval within the 2 years before fecal sampling
+  select(id, antid_over28_2yfecal)
+
+scapis <- scapis_c %>%
+  left_join(sca_psychi, by="id") %>%
+  left_join(any_antid, by="id") %>%
+  left_join(over_threshold, by="id") %>%
+  left_join(over_thresholds, by="id")  
+
+# comorbidities identified from registers: any other psychiatric disorders, CVD, diabetes
+any_psychi <- c("291", "292", "295", "296", "297", "298", "299", "300", "301", "302", "303", "304", "305", "306", "307", "308", "309", "310", "311", "312", "313", "314", "315", "316", "317", "318", "319", "F1", "F2", "F3", "F4", "F5", "F6", "F7", "F8", "F9")
+cvd <- c("39", "40", "41", "42", "43", "44", "45", "I")
+diabetes <- c("250", "E10", "E11", "E12", "E13", "E14", "O24")
+
+any_psychi_icd <- paste("^", any_psychi, sep="", collapse = "|")
+cvd_icd <- paste("^", cvd, sep="", collapse = "|")
+diabetes_icd <- paste("^", diabetes, sep="", collapse = "|")
+
+sca_diag <- scapis_p %>%
+  mutate(diag_year=as.numeric(format(diag_date, "%Y"))) %>%
+  mutate(any_psychi_date=ifelse(str_detect(diagnosis, any_psychi_icd), diag_date, NA),
+         cvd_date=ifelse(str_detect(diagnosis, cvd_icd), diag_date, NA),
+         diabetes_date=ifelse(str_detect(diagnosis, diabetes_icd), diag_date, NA))
+
+sca_any_psychi <- sca_diag %>%
+  filter(!is.na(any_psychi_date)) %>%
+  arrange(id, any_psychi_date) %>%
+  group_by(id) %>%
+  slice_head(n=1) %>%
+  ungroup() %>%
+  mutate(any_psychi_date=as.Date(any_psychi_date)) %>%
+  select(id, any_psychi_date)
+# 1798
+sca_any_psychi <- sca_any_psychi %>%
+  anti_join(sca_depre, by="id") %>%
+  anti_join(sca_anxiety, by="id") %>%
+  anti_join(sca_stress, by="id") %>%
+  rename(any_otherpsychi_date=any_psychi_date) %>%
+  select(id, any_otherpsychi_date)
+# 498
+sca_cvd <- sca_diag %>%
+  filter(!is.na(cvd_date)) %>%
+  arrange(id, cvd_date) %>%
+  group_by(id) %>%
+  slice_head(n=1) %>%
+  ungroup() %>%
+  mutate(cvd_date=as.Date(cvd_date)) %>%
+  select(id, cvd_date)
+#3414
+sca_diabetes <- sca_diag %>%
+  filter(!is.na(diabetes_date)) %>%
+  arrange(id, diabetes_date) %>%
+  group_by(id) %>%
+  slice_head(n=1) %>%
+  ungroup() %>%
+  mutate(diabetes_date=as.Date(diabetes_date)) %>%
+  select(id, diabetes_date)
+# 510
+
+scapis <- scapis %>%
+  left_join(sca_any_psychi, by="id") %>%
+  left_join(sca_cvd, by="id") %>%
+  left_join(sca_diabetes, by="id") 
+
+# antibiotics use 6 months or 1 year before fecal sampling
+antibio <- c("A07AA","C05AB","J01","J02AA","J04","R02AB")
+antibio_icd <- paste("^", antibio, sep="", collapse = "|")
+
+antibiotics <- scapis_drug %>%
+  mutate(antibio_date=ifelse(str_detect(atc, antibio_icd),dispen_date, NA)) %>%
+  filter(!is.na(antibio_date)) %>%
+  select(id, antibio_date) %>%
+  inner_join(sca_date, by="id") 
+antibio_6mon <- antibiotics %>%
+  filter(date_entry - antibio_date>0) %>%
+  filter(date_entry - antibio_date<183) %>%
+  distinct(id) %>%
+  mutate(antibiotics_6mon=1) # antibiotics use within 6 months before fecal sampling
+antibio_1year <- antibiotics %>%
+  filter(date_entry - antibio_date>0) %>%
+  filter(date_entry - antibio_date<366) %>%
+  distinct(id) %>%
+  mutate(antibiotics_1year=1) # antibiotics use within 1 year before fecal sampling
+
+scapis <- scapis %>%
+  left_join(antibio_6mon,by="id") %>%
+  left_join(antibio_1year,by="id")
+
+# sex and birth year at the first data request
+sex_birth <- read.csv("/proj/...path.../SCAPIS-DATA-P615-20240906.csv", header = T, sep=",")
+idmap <- read.csv("/proj/...path.../id-matchning-p551.csv", header = T, sep=";")
+
+idmap <- idmap %>%
+  rename(Subject=Petition551Id,
+         id=ScapisId)
+
+sex_birth <- sex_birth %>% 
+  left_join(idmap, by="Subject") %>%
+  rename(birthyear=YearOfBirth) %>%
+  mutate(sex=ifelse(Sex=="FEMALE",0,1)) %>%
+  select(id,sex,birthyear)
+
+scapis <- scapis %>%
+  left_join(sex_birth,by="id")
+  
+saveRDS(scapis, "/proj/...path.../scapis.RDS")
+#-------------------------------------------------------------------------------
+
+
+# to prepare the phenotype data for the analysis
+rm(list=ls())
+# SIMPLER
+simpler <- readRDS("/proj/...path.../simpler.RDS")
+simpler_antid <- readRDS("/proj/...path.../simpler_history_depression.RDS") %>%
+  mutate(antid_o2=pmax(antid_over28_3_4y_p, antid_over28_5_6y_p, antid_over28_7_8y_p, antid_over28_9_10y_p, antid_over28_over10y_p, na.rm = T),
+         antid=case_when(
+           antid_over28_0_2y_p==1 ~ 1,
+           !is.na(antid_o2) ~ 2),
+         antid=ifelse(!is.na(antid), antid, 3)) %>%
+  select(id, antid)
+
+simpler <- left_join(simpler, simpler_antid, by="id") %>%
+  filter(!is.na(clinicalvisit_date)) %>%
+  rename(alcohol=alc_clivc) %>%
+  mutate(year_fecal=as.numeric(format(clinicalvisit_date, "%Y")),
+         birthyear=as.numeric(format(dateofbirth, "%Y")),
+         age_atfecal=year_fecal - birthyear,
+         diff_fecal_2019=abs(year_fecal - 2019),
+         diff_fecal_hquest=abs(year_fecal - hquest_year),
+         diff_fecal_tquest=abs(age_atfecal - age_tquest),
+         employment=ifelse(!is.na(employ_hquest), employ_hquest, employ2019),
+         bmi=ifelse(!is.na(bmi_hquest), bmi_hquest, 
+                    ifelse(!is.na(bmi2019), bmi2019, bmi2008)),
+         smoke=ifelse(!is.na(smok_cliv), smok_cliv, smok2019),
+         smoke=ifelse(is.na(smoke) & smok2009>0, 1, 
+                      ifelse(is.na(smoke) & smok1997>0, 1, smoke)),
+         phy_act=ifelse(!is.na(met_cliv), ntile(met_cliv, 3), 
+                        ifelse(!is.na(met2019), ntile(met2019, 3), NA)),
+         probiotics=ifelse(!is.na(probiotics_cliv), probiotics_cliv, 0),
+         constipation=ifelse(!is.na(constipation_tquest), constipation_tquest,
+                             ifelse(!is.na(diff_fecal_hquest) & diff_fecal_hquest<diff_fecal_2019 & !is.na(constipation_hquest), constipation_hquest, constipation2019)),
+         age_crohn_ibs=pmin(age_first_crohn, age_first_ibs, na.rm = TRUE),
+         crohn_ibs=ifelse(!is.na(age_crohn_ibs) & age_crohn_ibs<=age_atfecal, 1, 0),
+         diabetes=ifelse(!is.na(diabetes_date) & diabetes_date<=clinicalvisit_date, 1, 0),
+         cvd=ifelse(!is.na(cvd_date) & cvd_date<=clinicalvisit_date, 1, 0),
+         other_psychi=ifelse(!is.na(any_otherpsychi_date) & any_otherpsychi_date<=clinicalvisit_date, 1, 0),
+         fiber_intake=ifelse(!is.na(cliv_nut06), cliv_nut06,q19_nut06),
+         energy_intake=ifelse(!is.na(cliv_nut08), cliv_nut08,q19_nut08),
+         antibiotics_6mon=ifelse(!is.na(antibiotics_6mon), antibiotics_6mon, 0),
+         antibiotics_1year=ifelse(!is.na(antibiotics_1year), antibiotics_1year, 0)
+         ) 
+
+# definition of depression
+# any --> diagnosis or drugs
+# by different approaches --> 1. only drugs (with at least 28-day duration), 2. diagnosis only or with drugs, 3. only symptoms
+simpler <- simpler %>%
+  mutate(
+    depre_selfreport=ifelse(!is.na(age_first_depression) & age_first_depression<=age_atfecal,1,0),
+    depre_diag=ifelse(!is.na(date_depre) & date_depre<=clinicalvisit_date, 1, 0),
+    depre_anti=ifelse(antid_over28==1, 1,0),
+    depre_sym = case_when(
+      depress2008==1 ~ 1,
+      year_fecal>=2019 & depress2019==1 ~ 1),
+    depre_atfecal_bydef=case_when(
+      depre_anti==1 & depre_selfreport==0 & depre_diag==0 ~ 1,
+      depre_selfreport==1 | depre_diag==1 ~ 2,
+      depre_sym==1 ~ 3),
+    depre_atfecal_bydef=ifelse(!is.na(depre_atfecal_bydef), depre_atfecal_bydef, 0)) 
+
+simpler <- simpler %>%
+  rename(date_fecal=clinicalvisit_date) %>%
+  mutate(education=ifelse(is.na(education), 4, education), # 4- unknown
+         employment=ifelse(employment %in% c(1:3), employment,
+                           ifelse(employment %in% c(4,5), 4, 5)), # 4- disability pension or retried; 5-unknown
+         constipation=ifelse(!is.na(constipation), constipation, 5), # 4- unknown
+         phy_act=ifelse(!is.na(phy_act), phy_act, 4), # 4-unknown
+         smoke=ifelse(!is.na(smoke), smoke, 3), #3-unknown
+         bmi=ifelse(bmi>50 | bmi<15, NA, bmi),
+         bmic=case_when(
+           is.na(bmi) ~ 4, #unknown
+           bmi>0 & bmi<18 ~ 1, # underweight
+           bmi>=18 & bmi<=25 ~ 2, # normal weight
+           bmi>25 ~ 3 #3-overweight or obese
+         ),
+         depre_atfecal=ifelse(depre_atfecal_bydef==0, 0, 1),
+         antid=ifelse(!is.na(antid), antid, 
+                      ifelse(depre_atfecal==1, 4, 0)),
+         depre_bydef=ifelse(antid>0 & antid<3,1,
+                            ifelse(depre_atfecal_bydef==2, 2,
+                                   ifelse(depre_atfecal_bydef==3, 3, 0)))) 
+
+saveRDS(simpler, "/proj/...path.../simpler_study_analysis.RDS")
+
+# SCAPIS
+rm(list=ls())
+scapis <- readRDS("/proj/...path.../scapis.RDS")
+scapis_antid <- readRDS("/proj/...path.../scapis_history_depression.RDS") %>%
+  mutate(antid_o2=pmax(antid_over28_3_4y_p, antid_over28_5_6y_p, antid_over28_7_8y_p, antid_over28_9_10y_p, antid_over28_over10y_p, na.rm = T),
+         antid=case_when(
+           antid_over28_0_2y_p==1 ~ 1,
+           !is.na(antid_o2) ~ 2),
+         antid=ifelse(!is.na(antid), antid, 3)) %>%
+  select(id, antid)
+
+scapis <- left_join(scapis, scapis_antid, by="id") %>%
+  rename(date_fecal=date_entry,
+         employment=employ,
+         bmi=BMI,
+         fiber_intake=Fibrer,
+         energy_intake=Energi_kcal) %>%
+  mutate(
+    bmic=case_when(
+      is.na(bmi) ~ 4, #unknown
+      bmi>0 & bmi<18 ~ 1, # underweight
+      bmi>=18 & bmi<=25 ~ 2, # normal weight
+      bmi>25 ~ 3 #3-overweight or obese
+    ),
+    year_fecal=as.numeric(format(date_fecal, "%Y")),
+    age_atfecal=year_fecal - birthyear,
+    alcoholc=ifelse(!is.na(alcohol), ntile(alcohol, 3), NA),
+    phy_act=ifelse(!is.na(physi_act_met), ntile(physi_act_met, 3), NA),
+    employment=ifelse(employment %in% c(1:3), employment,
+                      ifelse(employment %in% c(4,5), 4, 5)), # 4-disability pension or retired, 5-unknown
+    marital=ifelse(!is.na(marital), marital, 4), #4-unknown
+    education=ifelse(!is.na(education), education, 4), #4-unkown
+    diabetes=ifelse(!is.na(diabetes), diabetes, 
+                    ifelse(!is.na(diabetes_date) & diabetes_date<=date_fecal, 1, 0)),
+    crohn=ifelse(!is.na(crohn), crohn, 0),
+    other_psychi=ifelse(!is.na(any_otherpsychi_date) & any_otherpsychi_date<=date_fecal, 1, 0),
+    cvd=ifelse(!is.na(cvd_date) & cvd_date<=date_fecal, 1, 0),
+    probiotics=ifelse(q48Checkbox1=="YES", 1, 0),
+    antibiotics_6mon=ifelse(!is.na(antibiotics_6mon), antibiotics_6mon, 0),
+    antibiotics_1year=ifelse(!is.na(antibiotics_1year), antibiotics_1year, 0),
+    depre_anti=ifelse(!is.na(antid_over28), 1, 0),
+    depre_diag=ifelse(!is.na(date_depre) & date_depre<=date_fecal, 1, 0),
+    depre_sym=ifelse(depress_sym %in% c(1,2), 1, 0)
+  ) 
+
+scapis <- scapis %>%
+  mutate(
+    depre_atfecal_bydef=ifelse(depre_anti==1 & depre_diag==0, 1, 
+                               ifelse(depre_diag==1, 2, 
+                                      ifelse(depre_sym==1, 3, 0))),
+    depre_atfecal=ifelse(depre_atfecal_bydef==0, 0, 1),
+    antid=ifelse(!is.na(antid), antid, 
+                 ifelse(depre_atfecal==1, 4, 0)),
+    depre_bydef=ifelse(antid>0 & antid<3,1,
+                       ifelse(depre_atfecal_bydef==2, 2,
+                              ifelse(depre_atfecal_bydef==3, 3, 0)))) %>%
+  rename(crohn_ibs=crohn) 
+
+saveRDS(scapis, "/proj/...path.../scapis_study_analysis.RDS")
+#-------------------------------------------------------------------------------
+
+
+
